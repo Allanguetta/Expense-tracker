@@ -1,0 +1,32 @@
+# Environment and secrets
+.env
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Local databases
+*.db
+
+# Python
+backend/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Node / Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+
+# IDE / tooling
+.vscode/
+.qodo/
+
+# OS files
+.DS_Store
+Thumbs.db
