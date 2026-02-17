@@ -2,6 +2,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { MenuButton } from '@/components/ui/menu-button';
@@ -99,6 +100,21 @@ export default function TransactionsScreen() {
     [buildQuery, request]
   );
 
+  const loadMetadata = useCallback(async () => {
+    const [accountsData, categoriesData] = await Promise.all([
+      request<Account[]>('/accounts'),
+      request<Category[]>('/categories'),
+    ]);
+    setAccounts(accountsData);
+    setCategories(categoriesData);
+    setSelectedAccountId((prev) => {
+      if (prev && accountsData.some((account) => account.id === prev)) {
+        return prev;
+      }
+      return accountsData[0]?.id ?? null;
+    });
+  }, [request]);
+
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -120,30 +136,30 @@ export default function TransactionsScreen() {
     };
   }, [appliedFilters, loadTransactions]);
 
-  useEffect(() => {
-    let active = true;
-    Promise.all([request<Account[]>('/accounts'), request<Category[]>('/categories')])
-      .then(([accountsData, categoriesData]) => {
-        if (!active) return;
-        setAccounts(accountsData);
-        setCategories(categoriesData);
-        setSelectedAccountId((prev) => prev ?? accountsData[0]?.id ?? null);
-      })
-      .catch(() => {
-        if (!active) return;
-        setError('Unable to load metadata.');
-      });
-    return () => {
-      active = false;
-    };
-  }, [request]);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      loadMetadata()
+        .then(() => {
+          if (!active) return;
+          setError((prev) => (prev === 'Unable to load metadata.' ? '' : prev));
+        })
+        .catch(() => {
+          if (!active) return;
+          setError('Unable to load metadata.');
+        });
+      return () => {
+        active = false;
+      };
+    }, [loadMetadata])
+  );
 
   useEffect(() => {
     if (!selectedCategoryId) {
       return;
     }
     const match = categories.find((category) => category.id === selectedCategoryId);
-    if (match && match.kind.toLowerCase() !== categoryKind) {
+    if (!match || match.kind.toLowerCase() !== categoryKind) {
       setSelectedCategoryId(null);
     }
   }, [categories, categoryKind, selectedCategoryId]);
