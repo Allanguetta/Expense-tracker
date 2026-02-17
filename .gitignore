@@ -22,6 +22,7 @@ backend/.venv/
 # Node / Expo
 mobile/node_modules/
 mobile/.expo/
+mobile/.eas/
 mobile/dist/
 mobile/web-build/
 
