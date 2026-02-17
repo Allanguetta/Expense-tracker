@@ -29,24 +29,35 @@ The repo includes `mobile/eas.json` and `mobile/.env.example`.
 ### One-time setup
 
 1. In `mobile`:
+   - use Node 22 LTS (`.nvmrc` is included):
+     - `nvm use 22.14.0`
    - `npm install`
    - `npx eas login`
    - `npx eas init`
 2. Create `mobile/.env` from `mobile/.env.example` and set:
    - `EXPO_PUBLIC_API_BASE_URL=https://<your-backend>.onrender.com`
 
+### Config already set in this repo
+
+- `mobile/app.json` includes production identifiers:
+  - Android package: `com.allanguetta.expensetracker`
+  - iOS bundle id: `com.allanguetta.expensetracker`
+- `mobile/eas.json` build profiles already point to:
+  - `https://expense-tracker-backend-7hyn.onrender.com`
+
 ### Build commands
 
 - Android preview build:
-  - `npx eas build --platform android --profile preview`
+  - `npx eas-cli build --platform android --profile preview`
 - Android production build:
-  - `npx eas build --platform android --profile production`
+  - `npx eas-cli build --platform android --profile production`
 - iOS production build:
-  - `npx eas build --platform ios --profile production`
+  - `npx eas-cli build --platform ios --profile production`
 
 ### OTA updates (JS-only changes)
 
 - `npx eas update --branch production --message "your update message"`
+ - `npx eas-cli update --branch production --message "your update message"`
 
 ## 3) Environment Checklist
 

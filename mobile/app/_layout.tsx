@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import 'react-native-reanimated';
 import { useEffect } from 'react';
 import { ActivityIndicator, Text, TextInput, View } from 'react-native';
@@ -63,15 +64,39 @@ export default function RootLayout() {
 
 function AppProviders() {
   const { mode } = useThemeMode();
+  const colors = useThemeColors();
+
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(colors.background).catch(() => undefined);
+  }, [colors.background]);
+
+  const navigationTheme = mode === 'dark' ? DarkTheme : DefaultTheme;
+
   return (
-    <SafeAreaProvider>
-      <NavigationThemeProvider value={mode === 'dark' ? DarkTheme : DefaultTheme}>
-        <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+    <SafeAreaProvider style={{ backgroundColor: colors.background }}>
+      <NavigationThemeProvider
+        value={{
+          ...navigationTheme,
+          colors: {
+            ...navigationTheme.colors,
+            background: colors.background,
+            card: colors.card,
+            text: colors.text,
+            primary: colors.primary,
+            border: colors.line,
+            notification: colors.accent,
+          },
+        }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top', 'left', 'right', 'bottom']}>
           <AuthProvider>
             <RootLayoutNav />
           </AuthProvider>
         </SafeAreaView>
-        <StatusBar style={mode === 'dark' ? 'light' : 'dark'} translucent={false} />
+        <StatusBar
+          style={mode === 'dark' ? 'light' : 'dark'}
+          backgroundColor={colors.background}
+          translucent={false}
+        />
       </NavigationThemeProvider>
     </SafeAreaProvider>
   );

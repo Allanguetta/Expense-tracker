@@ -5,6 +5,7 @@
 1. Install dependencies:
 
 ```bash
+nvm use 22.14.0
 npm install
 ```
 
@@ -25,17 +26,17 @@ npm run start
 The project includes `eas.json` with `development`, `preview`, and `production` profiles.
 
 ```bash
-npx eas login
-npx eas init
-npx eas build --platform android --profile preview
-npx eas build --platform android --profile production
-npx eas build --platform ios --profile production
+npx eas-cli login
+npx eas-cli init
+npx eas-cli build --platform android --profile preview
+npx eas-cli build --platform android --profile production
+npx eas-cli build --platform ios --profile production
 ```
 
 ## OTA updates
 
 ```bash
-npx eas update --branch production --message "update message"
+npx eas-cli update --branch production --message "update message"
 ```
 
 ## Deployment reference
