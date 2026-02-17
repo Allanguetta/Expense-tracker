@@ -1,11 +1,13 @@
 databases:
   - name: expense-tracker-db
+    plan: free
     databaseName: expense_tracker
     user: expense_tracker
 
 services:
   - type: web
     name: expense-tracker-backend
+    plan: free
     env: docker
     rootDir: backend
     dockerfilePath: ./Dockerfile
