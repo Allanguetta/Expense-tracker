@@ -1,8 +1,9 @@
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import * as DocumentPicker from 'expo-document-picker';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { MenuButton } from '@/components/ui/menu-button';
@@ -10,11 +11,26 @@ import { ThemeToggleButton } from '@/components/ui/theme-toggle';
 import { RADIUS, SPACING, type ThemeColors } from '@/constants/ui-theme';
 import { useAuth } from '@/context/auth';
 import { useThemeColors } from '@/context/theme';
-import type { Account, Category, Transaction } from '@/lib/types';
+import type {
+  Account,
+  Category,
+  Transaction,
+  TransactionImportCommitResult,
+  TransactionImportPreview,
+} from '@/lib/types';
 
 const EXPENSE_COLORS = ['#0EA5A4', '#F97316', '#EF4444', '#3B82F6', '#F59E0B', '#10B981'];
 const INCOME_COLORS = ['#10B981', '#14B8A6', '#22C55E', '#84CC16', '#06B6D4', '#0EA5E9'];
 type RecurringFrequency = 'weekly' | 'monthly';
+type CategoryScope = 'all' | 'categorized' | 'uncategorized';
+type TransactionFilters = {
+  startDate: string;
+  endDate: string;
+  accountId: number | null;
+  categoryId: number | null;
+  search: string;
+  categoryScope: CategoryScope;
+};
 
 function computeNextRecurringDate(dateText: string, frequency: RecurringFrequency): string {
   const base = new Date(`${dateText}T00:00:00Z`);
@@ -48,6 +64,8 @@ export default function TransactionsScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [formError, setFormError] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isRecurring, setIsRecurring] = useState(false);
@@ -57,23 +75,27 @@ export default function TransactionsScreen() {
   const [isExpense, setIsExpense] = useState(true);
   const [form, setForm] = useState({
     description: '',
+    note: '',
     amount: '',
     currency: 'EUR',
     occurredAt: new Date().toISOString().slice(0, 10),
   });
-  const [filters, setFilters] = useState({
+  const defaultFilters: TransactionFilters = {
     startDate: '',
     endDate: '',
-    accountId: null as number | null,
-    categoryId: null as number | null,
-  });
+    accountId: null,
+    categoryId: null,
+    search: '',
+    categoryScope: 'all',
+  };
+  const [filters, setFilters] = useState<TransactionFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const showSkeleton = loading && items.length === 0 && !error;
   const isEditing = editingId !== null;
   const categoryKind = isExpense ? 'expense' : 'income';
   const categoryKindLabel = isExpense ? 'Expense' : 'Income';
 
-  const buildQuery = useCallback((activeFilters: typeof filters) => {
+  const buildQuery = useCallback((activeFilters: TransactionFilters) => {
     const params = new URLSearchParams();
     if (activeFilters.startDate) {
       params.set('start_date', `${activeFilters.startDate}T00:00:00Z`);
@@ -84,15 +106,23 @@ export default function TransactionsScreen() {
     if (activeFilters.accountId) {
       params.set('account_id', String(activeFilters.accountId));
     }
-    if (activeFilters.categoryId) {
+    if (activeFilters.categoryScope === 'uncategorized') {
+      params.set('uncategorized', 'true');
+    } else if (activeFilters.categoryScope === 'categorized') {
+      params.set('uncategorized', 'false');
+    }
+    if (activeFilters.categoryScope !== 'uncategorized' && activeFilters.categoryId) {
       params.set('category_id', String(activeFilters.categoryId));
+    }
+    if (activeFilters.search.trim()) {
+      params.set('search', activeFilters.search.trim());
     }
     params.set('limit', '50');
     return params.toString();
   }, []);
 
   const loadTransactions = useCallback(
-    async (activeFilters: typeof filters) => {
+    async (activeFilters: TransactionFilters) => {
       const query = buildQuery(activeFilters);
       const path = query ? `/transactions?${query}` : '/transactions';
       return request<Transaction[]>(path);
@@ -167,6 +197,7 @@ export default function TransactionsScreen() {
   const resetForm = () => {
     setForm({
       description: '',
+      note: '',
       amount: '',
       currency: 'EUR',
       occurredAt: new Date().toISOString().slice(0, 10),
@@ -182,6 +213,7 @@ export default function TransactionsScreen() {
 
   const handleSave = async () => {
     const description = form.description.trim();
+    const note = form.note.trim();
     const amountValue = Number(form.amount);
     const currency = form.currency.trim().toUpperCase();
     const dateText = form.occurredAt.trim();
@@ -218,6 +250,7 @@ export default function TransactionsScreen() {
     try {
       const payload = {
         description,
+        note: note || null,
         currency,
         amount: signedAmount,
         occurred_at: parsedDate.toISOString(),
@@ -283,6 +316,7 @@ export default function TransactionsScreen() {
   const handleEdit = (item: Transaction) => {
     setForm({
       description: item.description,
+      note: item.note ?? '',
       amount: Math.abs(item.amount).toString(),
       currency: item.currency,
       occurredAt: item.occurred_at.slice(0, 10),
@@ -327,9 +361,121 @@ export default function TransactionsScreen() {
   };
 
   const handleClearFilters = () => {
-    const cleared = { startDate: '', endDate: '', accountId: null, categoryId: null };
+    const cleared: TransactionFilters = { ...defaultFilters };
     setFilters(cleared);
     setAppliedFilters(cleared);
+  };
+
+  const getMimeTypeFromFileName = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.csv')) return 'text/csv';
+    return 'application/octet-stream';
+  };
+
+  const commitStatementImport = async (preview: TransactionImportPreview, accountId: number) => {
+    setImporting(true);
+    try {
+      const commitRows = preview.rows.map((row) => ({
+        ...row,
+        selected: row.selected ?? (row.error == null && !row.is_duplicate),
+      }));
+      const result = await request<TransactionImportCommitResult>('/imports/transactions/commit', {
+        method: 'POST',
+        body: {
+          account_id: accountId,
+          rows: commitRows,
+        },
+      });
+      const refreshed = await loadTransactions(appliedFilters);
+      setItems(refreshed);
+      Alert.alert(
+        'Import complete',
+        `Imported: ${result.imported_count}\nDuplicates skipped: ${result.skipped_duplicates}\nInvalid skipped: ${result.skipped_invalid}`
+      );
+    } catch {
+      Alert.alert('Import failed', 'Unable to commit imported rows.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleImportStatement = async () => {
+    const accountId = selectedAccountId ?? accounts[0]?.id ?? null;
+    if (!accountId) {
+      Alert.alert('No account selected', 'Create or select an account before importing a statement.');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'application/pdf'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled) {
+        return;
+      }
+
+      const asset = picked.assets[0];
+      const fileName = asset.name || 'statement.csv';
+      const mimeType = asset.mimeType || getMimeTypeFromFileName(fileName);
+
+      const formData = new FormData();
+      formData.append('account_id', String(accountId));
+      formData.append('file', {
+        uri: asset.uri,
+        name: fileName,
+        type: mimeType,
+      } as any);
+
+      const preview = await request<TransactionImportPreview>('/imports/transactions/preview', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const summary = `File: ${preview.filename}\nValid rows: ${preview.valid_rows}\nDuplicates: ${preview.duplicate_rows}\nInvalid: ${preview.invalid_rows}`;
+      if (preview.valid_rows === 0) {
+        Alert.alert('Nothing to import', summary);
+        return;
+      }
+
+      Alert.alert('Statement preview', `${summary}\n\nProceed with import?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Import',
+          onPress: () => {
+            void commitStatementImport(preview, accountId);
+          },
+        },
+      ]);
+    } catch {
+      Alert.alert('Import failed', 'Unable to parse this file. Use a CSV or text-based PDF statement.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleExportCsv = async () => {
+    setExporting(true);
+    try {
+      const query = buildQuery(appliedFilters);
+      const path = query ? `/transactions/export?${query}` : '/transactions/export';
+      const csvContent = await request<string>(path);
+      if (!csvContent?.trim()) {
+        Alert.alert('Nothing to export', 'No transactions matched your current filters.');
+        return;
+      }
+      await Share.share({
+        title: 'Transactions CSV',
+        message: csvContent,
+      });
+    } catch {
+      Alert.alert('Export failed', 'Unable to export transactions right now.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const accountMap = useMemo(() => {
@@ -375,6 +521,23 @@ export default function TransactionsScreen() {
           <ThemeToggleButton style={styles.iconButton} />
           <Pressable
             style={styles.iconButton}
+            onPress={() => void handleImportStatement()}
+            disabled={importing}>
+            <MaterialIcons
+              name={importing ? 'hourglass-empty' : 'upload-file'}
+              size={20}
+              color={colors.text}
+            />
+          </Pressable>
+          <Pressable style={styles.iconButton} onPress={() => void handleExportCsv()} disabled={exporting}>
+            <MaterialIcons
+              name={exporting ? 'hourglass-empty' : 'file-download'}
+              size={20}
+              color={colors.text}
+            />
+          </Pressable>
+          <Pressable
+            style={styles.iconButton}
             onPress={() => {
               if (showForm && isEditing) {
                 resetForm();
@@ -401,6 +564,16 @@ export default function TransactionsScreen() {
         </Pressable>
         {showFilters ? (
           <View style={styles.formBody}>
+            <View style={styles.field}>
+              <Text style={styles.label}>Search</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Description or note"
+                placeholderTextColor={colors.muted}
+                value={filters.search}
+                onChangeText={(text) => setFilters((prev) => ({ ...prev, search: text }))}
+              />
+            </View>
             <View style={styles.fieldRow}>
               <View style={styles.fieldGrow}>
                 <Text style={styles.label}>Start date</Text>
@@ -460,8 +633,47 @@ export default function TransactionsScreen() {
               <Text style={styles.label}>Categories</Text>
               <View style={styles.chipRow}>
                 <Pressable
+                  style={[styles.chip, filters.categoryScope === 'all' && styles.chipActive]}
+                  onPress={() => setFilters((prev) => ({ ...prev, categoryScope: 'all' }))}>
+                  <Text style={[styles.chipText, filters.categoryScope === 'all' && styles.chipTextActive]}>
+                    All
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.chip, filters.categoryScope === 'categorized' && styles.chipActive]}
+                  onPress={() => setFilters((prev) => ({ ...prev, categoryScope: 'categorized' }))}>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      filters.categoryScope === 'categorized' && styles.chipTextActive,
+                    ]}>
+                    Categorized
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.chip, filters.categoryScope === 'uncategorized' && styles.chipActive]}
+                  onPress={() =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      categoryScope: 'uncategorized',
+                      categoryId: null,
+                    }))
+                  }>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      filters.categoryScope === 'uncategorized' && styles.chipTextActive,
+                    ]}>
+                    Uncategorized
+                  </Text>
+                </Pressable>
+              </View>
+              <View style={styles.chipRow}>
+                <Pressable
                   style={[styles.chip, filters.categoryId === null && styles.chipActive]}
-                  onPress={() => setFilters((prev) => ({ ...prev, categoryId: null }))}>
+                  onPress={() =>
+                    setFilters((prev) => ({ ...prev, categoryId: null, categoryScope: 'all' }))
+                  }>
                   <View style={styles.chipLabel}>
                     <View style={[styles.colorDot, { backgroundColor: colors.ringTrack }]} />
                     <Text
@@ -476,8 +688,16 @@ export default function TransactionsScreen() {
                 {categories.map((category) => (
                   <Pressable
                     key={category.id}
+                    disabled={filters.categoryScope === 'uncategorized'}
                     style={[styles.chip, filters.categoryId === category.id && styles.chipActive]}
-                    onPress={() => setFilters((prev) => ({ ...prev, categoryId: category.id }))}>
+                    onPress={() =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        categoryId: category.id,
+                        categoryScope:
+                          prev.categoryScope === 'uncategorized' ? 'all' : prev.categoryScope,
+                      }))
+                    }>
                     <View style={styles.chipLabel}>
                       <View
                         style={[
@@ -536,6 +756,19 @@ export default function TransactionsScreen() {
                 placeholderTextColor={colors.muted}
                 value={form.description}
                 onChangeText={(text) => setForm((prev) => ({ ...prev, description: text }))}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Note (optional)</Text>
+              <TextInput
+                style={[styles.input, styles.textAreaInput]}
+                placeholder="Add details for this transaction"
+                placeholderTextColor={colors.muted}
+                value={form.note}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, note: text }))}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
               />
             </View>
             <View style={styles.fieldRow}>
@@ -774,6 +1007,7 @@ export default function TransactionsScreen() {
                       ' | ' +
                       item.occurred_at.slice(0, 10)}
                   </Text>
+                  {item.note ? <Text style={styles.rowNote}>{item.note}</Text> : null}
                 </View>
                 <View style={styles.rowRight}>
                   <Text style={[styles.amount, item.amount > 0 && styles.amountPositive]}>
@@ -905,6 +1139,9 @@ const createStyles = (colors: ThemeColors) =>
     paddingVertical: SPACING.sm,
     color: colors.text,
     backgroundColor: colors.card,
+  },
+  textAreaInput: {
+    minHeight: 78,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -1144,6 +1381,12 @@ const createStyles = (colors: ThemeColors) =>
   rowSubtitle: {
     marginTop: 4,
     color: colors.muted,
+  },
+  rowNote: {
+    marginTop: 4,
+    color: colors.text,
+    maxWidth: 220,
+    opacity: 0.9,
   },
   amount: {
     fontWeight: '700',

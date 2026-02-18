@@ -121,9 +121,11 @@ export async function apiRequest<T>(
     Authorization: `Bearer ${token}`,
     ...(options.headers ?? {}),
   };
-  let body: string | undefined;
+  let body: BodyInit | undefined;
   if (options.body !== undefined) {
-    if (typeof options.body === 'string') {
+    if (typeof FormData !== 'undefined' && options.body instanceof FormData) {
+      body = options.body;
+    } else if (typeof options.body === 'string') {
       body = options.body;
     } else {
       body = JSON.stringify(options.body);

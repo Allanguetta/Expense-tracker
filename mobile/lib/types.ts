@@ -92,6 +92,40 @@ export type Transaction = {
   occurred_at: string;
 };
 
+export type TransactionImportRow = {
+  line_number: number;
+  category_id?: number | null;
+  description: string;
+  note?: string | null;
+  currency: string;
+  amount?: number | null;
+  occurred_at?: string | null;
+  external_id?: string | null;
+  is_duplicate: boolean;
+  duplicate_reason?: string | null;
+  error?: string | null;
+  selected: boolean;
+};
+
+export type TransactionImportPreview = {
+  source_type: 'csv' | 'pdf';
+  filename: string;
+  total_rows: number;
+  parsed_rows: number;
+  valid_rows: number;
+  duplicate_rows: number;
+  invalid_rows: number;
+  warnings: string[];
+  rows: TransactionImportRow[];
+};
+
+export type TransactionImportCommitResult = {
+  imported_count: number;
+  skipped_duplicates: number;
+  skipped_invalid: number;
+  transaction_ids: number[];
+};
+
 export type Budget = {
   id: number;
   name: string;
