@@ -1,6 +1,7 @@
 from datetime import date
 
 from pydantic import BaseModel
+from typing import Literal
 
 
 class DashboardCategorySpend(BaseModel):
@@ -48,9 +49,17 @@ class DashboardUpcomingRecurring(BaseModel):
     days_until_due: int
 
 
+class DashboardInsight(BaseModel):
+    id: str
+    level: Literal["danger", "warning", "info", "success"]
+    title: str
+    message: str
+
+
 class DashboardSummary(BaseModel):
     cashflow: DashboardCashflow
     spend_by_category: list[DashboardCategorySpend]
     net_worth: DashboardNetWorth
     budgets: list[DashboardBudgetStatus]
     upcoming_recurring: list[DashboardUpcomingRecurring]
+    insights: list[DashboardInsight]

@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models.account import Account
+from app.models.category import Category
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate
+from app.services.category_rules import find_matching_category_id
 
 router = APIRouter()
 
@@ -172,10 +174,27 @@ def create_transaction(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Linked transactions cannot target manual accounts",
         )
+    category_id = transaction_in.category_id
+    if category_id is not None:
+        category = (
+            db.query(Category)
+            .filter(Category.id == category_id, Category.user_id == current_user.id)
+            .first()
+        )
+        if not category:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    else:
+        category_id = find_matching_category_id(
+            db,
+            current_user.id,
+            description=transaction_in.description,
+            note=transaction_in.note,
+            amount=transaction_in.amount,
+        )
     transaction = Transaction(
         user_id=current_user.id,
         account_id=transaction_in.account_id,
-        category_id=transaction_in.category_id,
+        category_id=category_id,
         external_id=transaction_in.external_id,
         description=transaction_in.description,
         note=transaction_in.note,
@@ -218,6 +237,14 @@ def update_transaction(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Linked transactions cannot target manual accounts",
             )
+    if "category_id" in data and data["category_id"] is not None:
+        category = (
+            db.query(Category)
+            .filter(Category.id == data["category_id"], Category.user_id == current_user.id)
+            .first()
+        )
+        if not category:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
     for field, value in data.items():
         setattr(transaction, field, value)
     db.commit()

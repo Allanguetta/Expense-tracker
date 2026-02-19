@@ -1,8 +1,9 @@
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Svg, { Path } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
+import * as SecureStore from 'expo-secure-store';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { MenuButton } from '@/components/ui/menu-button';
@@ -12,6 +13,53 @@ import { useAuth } from '@/context/auth';
 import { useThemeColors } from '@/context/theme';
 import type { Category, DashboardSummary } from '@/lib/types';
 import { useRouter } from 'expo-router';
+
+type DashboardInsight = DashboardSummary['insights'][number];
+type DismissedInsightMap = Record<string, string>;
+
+const DISMISSED_INSIGHTS_KEY = 'DASHBOARD_DISMISSED_INSIGHTS_V1';
+
+function insightSignature(insight: DashboardInsight): string {
+  return `${insight.level}|${insight.title}|${insight.message}`;
+}
+
+async function readDismissedInsights(): Promise<DismissedInsightMap> {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window === 'undefined') return {};
+      const raw = window.localStorage.getItem(DISMISSED_INSIGHTS_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object') {
+        return parsed as DismissedInsightMap;
+      }
+      return {};
+    }
+    const raw = await SecureStore.getItemAsync(DISMISSED_INSIGHTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      return parsed as DismissedInsightMap;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeDismissedInsights(map: DismissedInsightMap): Promise<void> {
+  try {
+    const serialized = JSON.stringify(map);
+    if (Platform.OS === 'web') {
+      if (typeof window === 'undefined') return;
+      window.localStorage.setItem(DISMISSED_INSIGHTS_KEY, serialized);
+      return;
+    }
+    await SecureStore.setItemAsync(DISMISSED_INSIGHTS_KEY, serialized);
+  } catch {
+    return;
+  }
+}
 
 export default function DashboardScreen() {
   const { request } = useAuth();
@@ -25,12 +73,36 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [payingRecurringId, setPayingRecurringId] = useState<number | null>(null);
+  const [dismissedInsights, setDismissedInsights] = useState<DismissedInsightMap>({});
+  const [dismissedHydrated, setDismissedHydrated] = useState(false);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    readDismissedInsights()
+      .then((value) => {
+        if (!active) return;
+        setDismissedInsights(value);
+      })
+      .finally(() => {
+        if (active) {
+          setDismissedHydrated(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dismissedHydrated) return;
+    writeDismissedInsights(dismissedInsights).catch(() => undefined);
+  }, [dismissedHydrated, dismissedInsights]);
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -121,6 +193,13 @@ export default function DashboardScreen() {
   const isNegative = netWorth < 0;
   const topCategories = categoryRows.slice(0, 3);
   const upcomingRecurring = summary?.upcoming_recurring ?? [];
+  const insights = useMemo(() => summary?.insights ?? [], [summary]);
+  const visibleInsights = useMemo(() => {
+    if (!dismissedHydrated) {
+      return [];
+    }
+    return insights.filter((item) => dismissedInsights[item.id] !== insightSignature(item));
+  }, [dismissedHydrated, dismissedInsights, insights]);
   const isEmpty =
     !showSkeleton &&
     !error &&
@@ -153,6 +232,44 @@ export default function DashboardScreen() {
       }
     },
     [loadDashboard, request]
+  );
+
+  const dismissInsight = useCallback((insight: DashboardInsight) => {
+    setDismissedInsights((prev) => ({
+      ...prev,
+      [insight.id]: insightSignature(insight),
+    }));
+  }, []);
+
+  const getInsightAction = useCallback(
+    (insight: DashboardInsight) => {
+      if (insight.id.startsWith('budget-over-') || insight.id.startsWith('budget-risk-')) {
+        return {
+          label: 'Open budgets',
+          onPress: () => router.push('/budgets'),
+        };
+      }
+      if (insight.id === 'net-worth-negative') {
+        return {
+          label: 'Open debts',
+          onPress: () => router.push('/debts'),
+        };
+      }
+      if (insight.id === 'spending-trend-up' || insight.id === 'spending-trend-down') {
+        return {
+          label: 'Open transactions',
+          onPress: () => router.push('/transactions'),
+        };
+      }
+      if (insight.id === 'recurring-due-soon') {
+        return {
+          label: 'Open recurring',
+          onPress: () => router.push('/recurring'),
+        };
+      }
+      return null;
+    },
+    [router]
   );
 
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -209,6 +326,72 @@ export default function DashboardScreen() {
             <Text style={styles.alertSubtitle}>
               Net worth is below zero. Review debts and spending.
             </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {!showSkeleton && visibleInsights.length > 0 ? (
+        <View style={styles.insightsCard}>
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.cardTitle}>Insights</Text>
+              <Text style={styles.chartSubtitle}>Smart highlights for this period</Text>
+            </View>
+          </View>
+          <View style={styles.insightsList}>
+            {visibleInsights.map((item) => {
+              const action = getInsightAction(item);
+              return (
+              <View key={item.id} style={styles.insightRow}>
+                <View
+                  style={[
+                    styles.insightIcon,
+                    item.level === 'danger' && styles.insightIconDanger,
+                    item.level === 'warning' && styles.insightIconWarning,
+                    item.level === 'success' && styles.insightIconSuccess,
+                  ]}>
+                  <MaterialIcons
+                    name={
+                      item.level === 'danger'
+                        ? 'error-outline'
+                        : item.level === 'warning'
+                          ? 'warning-amber'
+                          : item.level === 'success'
+                            ? 'check-circle-outline'
+                            : 'info-outline'
+                    }
+                    size={16}
+                    color={
+                      item.level === 'danger'
+                        ? colors.danger
+                        : item.level === 'warning'
+                          ? '#f59e0b'
+                          : item.level === 'success'
+                            ? colors.primary
+                            : colors.text
+                    }
+                  />
+                </View>
+                <View style={styles.insightText}>
+                  <Text style={styles.insightTitle}>{item.title}</Text>
+                  <Text style={styles.insightMessage}>{item.message}</Text>
+                  {action ? (
+                    <Pressable
+                      style={styles.insightActionButton}
+                      onPress={action.onPress}>
+                      <Text style={styles.insightActionText}>{action.label}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                <Pressable
+                  style={styles.insightDismissButton}
+                  onPress={() => dismissInsight(item)}
+                  hitSlop={6}>
+                  <MaterialIcons name="close" size={14} color={colors.muted} />
+                </Pressable>
+              </View>
+              );
+            })}
           </View>
         </View>
       ) : null}
@@ -552,6 +735,84 @@ const createStyles = (colors: ThemeColors) =>
       padding: SPACING.md,
       marginBottom: SPACING.lg,
       gap: SPACING.md,
+    },
+    insightsCard: {
+      backgroundColor: colors.card,
+      borderRadius: RADIUS.lg,
+      borderWidth: 1,
+      borderColor: colors.line,
+      padding: SPACING.md,
+      marginBottom: SPACING.lg,
+      gap: SPACING.md,
+    },
+    insightsList: {
+      gap: SPACING.sm,
+    },
+    insightRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: SPACING.sm,
+      borderTopWidth: 1,
+      borderTopColor: colors.line,
+      paddingTop: SPACING.sm,
+    },
+    insightIcon: {
+      width: 28,
+      height: 28,
+      borderRadius: 10,
+      backgroundColor: colors.ringTrack,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    insightIconDanger: {
+      backgroundColor: 'rgba(248, 113, 113, 0.2)',
+    },
+    insightIconWarning: {
+      backgroundColor: 'rgba(245, 158, 11, 0.18)',
+    },
+    insightIconSuccess: {
+      backgroundColor: colors.accentSoft,
+    },
+    insightText: {
+      flex: 1,
+      gap: 2,
+    },
+    insightTitle: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    insightMessage: {
+      color: colors.muted,
+      fontSize: 12,
+    },
+    insightActionButton: {
+      alignSelf: 'flex-start',
+      marginTop: 6,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.line,
+      backgroundColor: colors.card,
+      paddingHorizontal: SPACING.sm,
+      paddingVertical: 5,
+    },
+    insightActionText: {
+      color: colors.text,
+      fontSize: 11,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    insightDismissButton: {
+      width: 24,
+      height: 24,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.line,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.card,
+      marginTop: 2,
     },
     recurringHeader: {
       flexDirection: 'row',

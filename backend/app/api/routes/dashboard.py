@@ -20,6 +20,7 @@ from app.schemas.dashboard import (
     DashboardBudgetStatus,
     DashboardCashflow,
     DashboardCategorySpend,
+    DashboardInsight,
     DashboardNetWorth,
     DashboardSummary,
     DashboardUpcomingRecurring,
@@ -37,6 +38,10 @@ def _month_bounds(target: date) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _format_amount(value: float, currency: str) -> str:
+    return f"{currency} {value:.2f}"
+
+
 @router.get("/summary", response_model=DashboardSummary)
 def get_dashboard_summary(
     db: Session = Depends(get_db),
@@ -47,8 +52,7 @@ def get_dashboard_summary(
     currency: str = Query(default="EUR", min_length=3, max_length=3),
     due_alert_days: int = Query(default=3, ge=0, le=30),
 ) -> DashboardSummary:
-    today = datetime.utcnow()
-    today_date = today.date()
+    today_date = date.today()
     if start_date is None or end_date is None:
         start_date, end_date = _month_bounds(today_date)
 
@@ -224,10 +228,137 @@ def get_dashboard_summary(
         for item in upcoming_rows
     ]
 
+    category_name_rows = (
+        db.query(Category.id, Category.name)
+        .filter(Category.user_id == current_user.id)
+        .all()
+    )
+    category_name_map = {row[0]: row[1] for row in category_name_rows}
+
+    insights: list[DashboardInsight] = []
+    if net_worth_value < 0:
+        insights.append(
+            DashboardInsight(
+                id="net-worth-negative",
+                level="danger",
+                title="Net worth is negative",
+                message=(
+                    f"Current net worth is {_format_amount(net_worth_value, currency)}. "
+                    "Review debt balances and discretionary spending."
+                ),
+            )
+        )
+
+    period_days = max((end_date - start_date).days, 1)
+    prev_start = start_date - timedelta(days=period_days)
+    prev_end = start_date
+    prev_inflow, prev_outflow = (
+        db.query(inflow_expr, outflow_expr)
+        .filter(
+            Transaction.user_id == current_user.id,
+            Transaction.occurred_at >= prev_start,
+            Transaction.occurred_at < prev_end,
+        )
+        .first()
+    )
+    prev_outflow_value = float(prev_outflow)
+    if prev_outflow_value > 0:
+        outflow_change_pct = ((float(outflow) - prev_outflow_value) / prev_outflow_value) * 100
+        if outflow_change_pct >= 20:
+            insights.append(
+                DashboardInsight(
+                    id="spending-trend-up",
+                    level="warning",
+                    title="Spending trend is rising",
+                    message=(
+                        f"Outflow is up {outflow_change_pct:.0f}% versus the previous period "
+                        f"({_format_amount(prev_outflow_value, currency)})."
+                    ),
+                )
+            )
+        elif outflow_change_pct <= -15:
+            insights.append(
+                DashboardInsight(
+                    id="spending-trend-down",
+                    level="success",
+                    title="Spending improved",
+                    message=(
+                        f"Outflow is down {abs(outflow_change_pct):.0f}% versus the previous period "
+                        f"({_format_amount(prev_outflow_value, currency)})."
+                    ),
+                )
+            )
+
+    budget_insights: list[tuple[float, DashboardInsight]] = []
+    for budget in budget_statuses:
+        for item in budget.items:
+            if item.limit_amount <= 0:
+                continue
+            ratio = item.spent / item.limit_amount
+            category_name = category_name_map.get(item.category_id, "Category")
+            if ratio >= 1:
+                budget_insights.append(
+                    (
+                        ratio,
+                        DashboardInsight(
+                            id=f"budget-over-{budget.id}-{item.category_id}",
+                            level="danger",
+                            title=f"{category_name} budget exceeded",
+                            message=(
+                                f"Spent {_format_amount(item.spent, budget.currency)} "
+                                f"on a limit of {_format_amount(item.limit_amount, budget.currency)}."
+                            ),
+                        ),
+                    )
+                )
+            elif ratio >= 0.85:
+                budget_insights.append(
+                    (
+                        ratio,
+                        DashboardInsight(
+                            id=f"budget-risk-{budget.id}-{item.category_id}",
+                            level="warning",
+                            title=f"{category_name} budget is close",
+                            message=(
+                                f"Used {ratio * 100:.0f}% of your limit "
+                                f"({_format_amount(item.spent, budget.currency)} / "
+                                f"{_format_amount(item.limit_amount, budget.currency)})."
+                            ),
+                        ),
+                    )
+                )
+    budget_insights.sort(key=lambda item: item[0], reverse=True)
+    insights.extend([insight for _, insight in budget_insights[:2]])
+
+    if upcoming_recurring:
+        soonest = upcoming_recurring[0]
+        insights.append(
+            DashboardInsight(
+                id="recurring-due-soon",
+                level="info",
+                title="Recurring payments due soon",
+                message=(
+                    f"{len(upcoming_recurring)} payment(s) due in the next {due_alert_days} day(s). "
+                    f"Next: {soonest.name} in {soonest.days_until_due} day(s)."
+                ),
+            )
+        )
+
+    if not insights:
+        insights.append(
+            DashboardInsight(
+                id="all-clear",
+                level="success",
+                title="No urgent financial alerts",
+                message="Everything looks stable this period. Keep tracking consistently.",
+            )
+        )
+
     return DashboardSummary(
         cashflow=cashflow,
         spend_by_category=spend_by_category,
         net_worth=net_worth,
         budgets=budget_statuses,
         upcoming_recurring=upcoming_recurring,
+        insights=insights,
     )

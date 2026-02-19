@@ -32,6 +32,27 @@ def test_statement_import_preview_and_commit_csv(client):
     )
     assert existing_transaction.status_code == 201
 
+    category_response = client.post(
+        "/categories",
+        json={"name": "Rent", "kind": "expense", "color": "#6366F1"},
+        headers=headers,
+    )
+    assert category_response.status_code == 201
+    rent_category_id = category_response.json()["id"]
+
+    rule_response = client.post(
+        "/category-rules",
+        json={
+            "category_id": rent_category_id,
+            "pattern": "Rent",
+            "match_type": "contains",
+            "applies_to_kind": "expense",
+            "priority": 10,
+        },
+        headers=headers,
+    )
+    assert rule_response.status_code == 201
+
     csv_content = """Date,Description,Amount,Currency,Reference,Note
 2026-02-01,Coffee Shop,-3.50,EUR,tx-001,Morning coffee
 2026-02-02,Rent,-500.00,EUR,tx-002,Monthly rent
@@ -51,6 +72,8 @@ def test_statement_import_preview_and_commit_csv(client):
     assert preview_data["valid_rows"] == 1
     assert preview_data["duplicate_rows"] == 1
     assert preview_data["invalid_rows"] == 1
+    rent_preview_row = next(row for row in preview_data["rows"] if row["description"] == "Rent")
+    assert rent_preview_row["category_id"] == rent_category_id
 
     commit_rows = preview_data["rows"]
     for row in commit_rows:
@@ -73,6 +96,7 @@ def test_statement_import_preview_and_commit_csv(client):
     assert len(rent_transactions) == 1
     assert rent_transactions[0]["description"] == "Rent"
     assert rent_transactions[0]["note"] == "Monthly rent"
+    assert rent_transactions[0]["category_id"] == rent_category_id
 
 
 def test_statement_import_preview_rejects_unsupported_files(client):

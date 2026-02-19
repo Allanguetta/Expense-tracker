@@ -12,6 +12,7 @@ import { useThemeColors, useThemeMode } from '@/context/theme';
 
 const SETTINGS = [
   { label: 'Profile', icon: 'person-outline', href: '/profile' },
+  { label: 'Category Rules', icon: 'rule', href: '/category-rules' },
   { label: 'Connected Accounts', icon: 'link', href: '/accounts' },
   { label: 'Sync Coinbase', icon: 'sync', action: 'sync' },
   { label: 'Export Data', icon: 'download', action: 'export' },

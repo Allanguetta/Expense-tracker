@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.db.session import get_db
 from app.models.account import Account
+from app.models.category import Category
 from app.models.transaction import Transaction
 from app.models.user import User
 from app.schemas.imports import (
@@ -19,6 +20,7 @@ from app.schemas.imports import (
     TransactionImportCommitResponse,
     TransactionImportPreviewResponse,
 )
+from app.services.category_rules import find_matching_category_id
 
 router = APIRouter()
 
@@ -33,7 +35,7 @@ DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y")
 CURRENCY_SYMBOLS = {"\u20AC": "EUR", "$": "USD", "\u00A3": "GBP"}
 CURRENCY_CODES = ("EUR", "USD", "GBP", "CHF")
 
-DATE_HEADER_KEYS = {
+DATE_HEADER_KEYS = (
     "date",
     "bookingdate",
     "valuedate",
@@ -43,24 +45,24 @@ DATE_HEADER_KEYS = {
     "createdat",
     "timestamp",
     "time",
-}
-DESCRIPTION_HEADER_KEYS = {
+)
+DESCRIPTION_HEADER_KEYS = (
     "description",
     "merchant",
     "details",
-    "reference",
     "payee",
     "counterparty",
     "name",
     "verwendungszweck",
     "bookingtext",
-}
-AMOUNT_HEADER_KEYS = {"amount", "transactionamount", "sum", "betrag", "value"}
-DEBIT_HEADER_KEYS = {"debit", "withdrawal", "outgoing", "paidout", "lastschrift"}
-CREDIT_HEADER_KEYS = {"credit", "deposit", "incoming", "paidin", "gutschrift"}
-CURRENCY_HEADER_KEYS = {"currency", "ccy", "currencycode", "wahrung"}
-NOTE_HEADER_KEYS = {"note", "notes", "memo", "comment", "purpose"}
-EXTERNAL_ID_HEADER_KEYS = {"id", "transactionid", "referenceid", "externalid", "bookingid"}
+    "reference",
+)
+AMOUNT_HEADER_KEYS = ("amount", "transactionamount", "sum", "betrag", "value")
+DEBIT_HEADER_KEYS = ("debit", "withdrawal", "outgoing", "paidout", "lastschrift")
+CREDIT_HEADER_KEYS = ("credit", "deposit", "incoming", "paidin", "gutschrift")
+CURRENCY_HEADER_KEYS = ("currency", "ccy", "currencycode", "wahrung")
+NOTE_HEADER_KEYS = ("note", "notes", "memo", "comment", "purpose")
+EXTERNAL_ID_HEADER_KEYS = ("externalid", "transactionid", "referenceid", "bookingid", "id")
 
 
 def _normalize_space(value: str) -> str:
@@ -72,7 +74,7 @@ def _normalize_header(value: str) -> str:
 
 
 def _resolve_header(
-    header_lookup: dict[str, str], preferred: set[str], fallback_contains: set[str] | None = None
+    header_lookup: dict[str, str], preferred: tuple[str, ...], fallback_contains: set[str] | None = None
 ) -> str | None:
     for key in preferred:
         if key in header_lookup:
@@ -479,6 +481,30 @@ def _load_account_or_404(db: Session, user_id: int, account_id: int) -> Account:
     return account
 
 
+def _assign_category_rules(
+    db: Session,
+    user_id: int,
+    rows: list[dict[str, Any]],
+) -> None:
+    for row in rows:
+        if row.get("error") is not None:
+            continue
+        if row.get("category_id") is not None:
+            continue
+        amount = row.get("amount")
+        description = _normalize_space(str(row.get("description") or ""))
+        note = _normalize_space(str(row.get("note") or "")) or None
+        if amount is None or not description:
+            continue
+        row["category_id"] = find_matching_category_id(
+            db,
+            user_id,
+            description=description,
+            note=note,
+            amount=float(amount),
+        )
+
+
 @router.post("/transactions/preview", response_model=TransactionImportPreviewResponse)
 async def preview_statement_import(
     account_id: int = Form(...),
@@ -518,6 +544,7 @@ async def preview_statement_import(
         rows,
         mutate_selection=True,
     )
+    _assign_category_rules(db, current_user.id, rows)
 
     return TransactionImportPreviewResponse(
         source_type=source_type,
@@ -556,10 +583,20 @@ def commit_statement_import(
         rows,
         mutate_selection=False,
     )
+    _assign_category_rules(db, current_user.id, rows)
 
     skipped_invalid = 0
     skipped_duplicates = 0
     created: list[Transaction] = []
+    category_ids = {row.get("category_id") for row in rows if row.get("category_id") is not None}
+    valid_category_ids: set[int] = set()
+    if category_ids:
+        valid_category_ids = {
+            row_id
+            for (row_id,) in db.query(Category.id)
+            .filter(Category.user_id == current_user.id, Category.id.in_(category_ids))
+            .all()
+        }
 
     for row in rows:
         if not row.get("selected", True):
@@ -578,6 +615,9 @@ def commit_statement_import(
         note = _normalize_space(str(row.get("note") or "")) or None
         external_id = _normalize_space(str(row.get("external_id") or "")) or None
         category_id = row.get("category_id")
+        if category_id is not None and category_id not in valid_category_ids:
+            skipped_invalid += 1
+            continue
 
         if not description or amount is None or amount == 0 or occurred_at is None or len(currency) != 3:
             skipped_invalid += 1

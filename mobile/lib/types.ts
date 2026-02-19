@@ -37,6 +37,12 @@ export type DashboardSummary = {
     next_due_date: string;
     days_until_due: number;
   }[];
+  insights: {
+    id: string;
+    level: 'danger' | 'warning' | 'info' | 'success';
+    title: string;
+    message: string;
+  }[];
 };
 
 export type Account = {
@@ -54,6 +60,20 @@ export type Category = {
   kind: string;
   is_system: boolean;
   color?: string | null;
+};
+
+export type CategoryRule = {
+  id: number;
+  user_id: number;
+  category_id: number;
+  pattern: string;
+  match_type: 'contains' | 'starts_with' | 'equals' | 'regex';
+  applies_to_kind: 'all' | 'expense' | 'income';
+  priority: number;
+  case_sensitive: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type Debt = {

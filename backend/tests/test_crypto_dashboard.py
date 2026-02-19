@@ -84,6 +84,8 @@ def test_crypto_symbols_price_refresh_and_dashboard(client, monkeypatch):
     assert "net_worth" in body
     assert "spend_by_category" in body
     assert "budgets" in body
+    assert "insights" in body
+    assert isinstance(body["insights"], list)
 
 
 def test_crypto_holdings_include_buy_price_and_gain_loss(client, monkeypatch):
@@ -115,3 +117,55 @@ def test_crypto_holdings_include_buy_price_and_gain_loss(client, monkeypatch):
     assert holding["current_value"] == 6000.0
     assert holding["gain_loss"] == 1000.0
     assert round(holding["gain_loss_pct"], 2) == 20.0
+
+
+def test_dashboard_surfaces_budget_risk_insight(client):
+    headers = auth_headers(client, email="insights@example.com")
+
+    account = client.post(
+        "/accounts",
+        json={"name": "Main", "account_type": "cash", "currency": "EUR", "balance": 1000.0, "is_manual": True},
+        headers=headers,
+    )
+    assert account.status_code == 201
+    account_id = account.json()["id"]
+
+    category = client.post(
+        "/categories",
+        json={"name": "Food", "kind": "expense"},
+        headers=headers,
+    )
+    assert category.status_code == 201
+    category_id = category.json()["id"]
+
+    budget = client.post(
+        "/budgets",
+        json={
+            "name": "Monthly",
+            "month": date.today().replace(day=1).isoformat(),
+            "currency": "EUR",
+            "items": [{"category_id": category_id, "limit_amount": 100.0}],
+        },
+        headers=headers,
+    )
+    assert budget.status_code == 201
+
+    txn = client.post(
+        "/transactions",
+        json={
+            "account_id": account_id,
+            "description": "Food shop",
+            "currency": "EUR",
+            "amount": -130.0,
+            "occurred_at": datetime.utcnow().isoformat(),
+            "category_id": category_id,
+            "is_manual": True,
+        },
+        headers=headers,
+    )
+    assert txn.status_code == 201
+
+    dashboard = client.get("/dashboard/summary", headers=headers)
+    assert dashboard.status_code == 200
+    insights = dashboard.json()["insights"]
+    assert any(item["id"].startswith("budget-over-") for item in insights)

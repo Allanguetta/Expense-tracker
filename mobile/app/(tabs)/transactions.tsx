@@ -14,6 +14,7 @@ import { useThemeColors } from '@/context/theme';
 import type {
   Account,
   Category,
+  CategoryRule,
   Transaction,
   TransactionImportCommitResult,
   TransactionImportPreview,
@@ -53,12 +54,42 @@ function computeNextRecurringDate(dateText: string, frequency: RecurringFrequenc
   return nextDate.toISOString().slice(0, 10);
 }
 
+function normalizeRuleText(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function ruleMatchesText(rule: CategoryRule, text: string): boolean {
+  if (!text) return false;
+  const target = rule.case_sensitive ? text : text.toLowerCase();
+  const pattern = rule.case_sensitive ? rule.pattern : rule.pattern.toLowerCase();
+
+  if (rule.match_type === 'contains') {
+    return target.includes(pattern);
+  }
+  if (rule.match_type === 'starts_with') {
+    return target.startsWith(pattern);
+  }
+  if (rule.match_type === 'equals') {
+    return target === pattern;
+  }
+  if (rule.match_type === 'regex') {
+    try {
+      const regex = new RegExp(rule.pattern, rule.case_sensitive ? '' : 'i');
+      return regex.test(text);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 export default function TransactionsScreen() {
   const { request } = useAuth();
   const colors = useThemeColors();
   const [items, setItems] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoryRules, setCategoryRules] = useState<CategoryRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -131,12 +162,14 @@ export default function TransactionsScreen() {
   );
 
   const loadMetadata = useCallback(async () => {
-    const [accountsData, categoriesData] = await Promise.all([
+    const [accountsData, categoriesData, rulesData] = await Promise.all([
       request<Account[]>('/accounts'),
       request<Category[]>('/categories'),
+      request<CategoryRule[]>('/category-rules').catch(() => [] as CategoryRule[]),
     ]);
     setAccounts(accountsData);
     setCategories(categoriesData);
+    setCategoryRules(rulesData);
     setSelectedAccountId((prev) => {
       if (prev && accountsData.some((account) => account.id === prev)) {
         return prev;
@@ -494,6 +527,14 @@ export default function TransactionsScreen() {
     return map;
   }, [categories]);
 
+  const categoryById = useMemo(() => {
+    const map: Record<number, Category> = {};
+    categories.forEach((category) => {
+      map[category.id] = category;
+    });
+    return map;
+  }, [categories]);
+
   const categoryColorMap = useMemo(() => {
     const map: Record<number, string> = {};
     const fallback = [...EXPENSE_COLORS, ...INCOME_COLORS];
@@ -507,6 +548,72 @@ export default function TransactionsScreen() {
     () => categories.filter((category) => category.kind.toLowerCase() === categoryKind),
     [categories, categoryKind]
   );
+
+  const suggestedCategory = useMemo(() => {
+    if (isEditing || selectedCategoryId !== null) {
+      return null;
+    }
+    const description = normalizeRuleText(form.description);
+    const note = normalizeRuleText(form.note);
+    if (!description && !note) {
+      return null;
+    }
+
+    const parsedAmount = Number(form.amount);
+    const signedAmount =
+      Number.isFinite(parsedAmount) && parsedAmount !== 0
+        ? isExpense
+          ? -Math.abs(parsedAmount)
+          : Math.abs(parsedAmount)
+        : isExpense
+          ? -1
+          : 1;
+    const transactionKind = signedAmount < 0 ? 'expense' : 'income';
+
+    const candidates = [description, note].filter(Boolean);
+    if (description && note) {
+      candidates.push(`${description} ${note}`);
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const sortedRules = [...categoryRules]
+      .filter((rule) => rule.is_active)
+      .sort((a, b) => a.priority - b.priority || a.id - b.id);
+
+    for (const rule of sortedRules) {
+      if (rule.applies_to_kind !== 'all' && rule.applies_to_kind !== transactionKind) {
+        continue;
+      }
+      const category = categoryById[rule.category_id];
+      if (!category) {
+        continue;
+      }
+      for (const candidate of candidates) {
+        if (ruleMatchesText(rule, candidate)) {
+          return { category, rule };
+        }
+      }
+    }
+    return null;
+  }, [
+    categoryRules,
+    categoryById,
+    form.amount,
+    form.description,
+    form.note,
+    isEditing,
+    isExpense,
+    selectedCategoryId,
+  ]);
+
+  const applySuggestedCategory = useCallback(() => {
+    if (!suggestedCategory) {
+      return;
+    }
+    setSelectedCategoryId(suggestedCategory.category.id);
+  }, [suggestedCategory]);
 
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -885,12 +992,36 @@ export default function TransactionsScreen() {
                   <Text style={styles.emptyText}>No {categoryKindLabel.toLowerCase()} categories yet.</Text>
                 ) : null}
               </View>
+              {suggestedCategory ? (
+                <View style={styles.suggestionCard}>
+                  <View style={styles.suggestionTextWrap}>
+                    <Text style={styles.suggestionLabel}>Suggested category</Text>
+                    <Text style={styles.suggestionValue}>
+                      {suggestedCategory.category.name}
+                      {' • '}
+                      {suggestedCategory.rule.match_type}
+                      {' "'}
+                      {suggestedCategory.rule.pattern}
+                      {'"'}
+                    </Text>
+                  </View>
+                  <Pressable style={styles.suggestionButton} onPress={applySuggestedCategory}>
+                    <Text style={styles.suggestionButtonText}>Use</Text>
+                  </Pressable>
+                </View>
+              ) : null}
               <View style={styles.manageRow}>
                 <Pressable
                   style={styles.manageButton}
                   onPress={() => router.push('/(tabs)/categories')}>
                   <MaterialIcons name="category" size={16} color={colors.text} />
                   <Text style={styles.manageButtonText}>Manage categories</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.manageButton}
+                  onPress={() => router.push('/(tabs)/category-rules')}>
+                  <MaterialIcons name="rule" size={16} color={colors.text} />
+                  <Text style={styles.manageButtonText}>Manage rules</Text>
                 </Pressable>
               </View>
             </View>
@@ -1201,8 +1332,52 @@ const createStyles = (colors: ThemeColors) =>
   chipTextActive: {
     color: '#fff',
   },
+  suggestionCard: {
+    marginTop: SPACING.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    backgroundColor: colors.ringTrack,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+  },
+  suggestionTextWrap: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  suggestionLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  suggestionValue: {
+    color: colors.text,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  suggestionButton: {
+    borderRadius: 999,
+    backgroundColor: colors.primary,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+  },
+  suggestionButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
   manageRow: {
     marginTop: SPACING.sm,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
   },
   manageButton: {
     flexDirection: 'row',

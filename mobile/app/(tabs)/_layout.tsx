@@ -42,6 +42,13 @@ export default function AppLayout() {
         }}
       />
       <Drawer.Screen
+        name="category-rules"
+        options={{
+          title: 'Category Rules',
+          drawerIcon: ({ color }) => <MaterialIcons name="rule" size={22} color={color} />,
+        }}
+      />
+      <Drawer.Screen
         name="accounts"
         options={{
           title: 'Accounts',

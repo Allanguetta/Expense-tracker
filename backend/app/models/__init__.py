@@ -12,6 +12,7 @@ from app.models.price_cache import PriceCache
 from app.models.refresh_token import RefreshToken
 from app.models.sync_log import SyncLog
 from app.models.recurring_payment import RecurringPayment
+from app.models.category_rule import CategoryRule
 
 __all__ = [
     "Base",
@@ -29,4 +30,5 @@ __all__ = [
     "RefreshToken",
     "SyncLog",
     "RecurringPayment",
+    "CategoryRule",
 ]

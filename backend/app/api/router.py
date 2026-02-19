@@ -4,6 +4,7 @@ from app.api.routes import (
     accounts,
     auth,
     budgets,
+    category_rules,
     categories,
     crypto,
     dashboard,
@@ -22,6 +23,7 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 api_router.include_router(transactions.router, prefix="/transactions", tags=["transactions"])
 api_router.include_router(categories.router, prefix="/categories", tags=["categories"])
+api_router.include_router(category_rules.router, prefix="/category-rules", tags=["category-rules"])
 api_router.include_router(budgets.router, prefix="/budgets", tags=["budgets"])
 api_router.include_router(debts.router, prefix="/debts", tags=["debts"])
 api_router.include_router(recurring.router, prefix="/recurring-payments", tags=["recurring"])
