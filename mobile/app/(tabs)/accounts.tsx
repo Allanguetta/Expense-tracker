@@ -103,7 +103,7 @@ export default function AccountsScreen() {
       }
       resetForm();
       setShowForm(false);
-    } catch (saveError) {
+    } catch {
       setFormError(isEditing ? 'Unable to update account.' : 'Unable to create account.');
     } finally {
       setSaving(false);
@@ -135,7 +135,7 @@ export default function AccountsScreen() {
         resetForm();
         setShowForm(false);
       }
-    } catch (deleteError) {
+    } catch {
       setError('Unable to delete account.');
     }
   };

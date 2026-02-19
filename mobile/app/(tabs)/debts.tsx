@@ -124,7 +124,7 @@ export default function DebtsScreen() {
       }
       resetForm();
       setShowForm(false);
-    } catch (saveError) {
+    } catch {
       setFormError(isEditing ? 'Unable to update debt.' : 'Unable to create debt.');
     } finally {
       setSaving(false);
@@ -163,7 +163,7 @@ export default function DebtsScreen() {
         resetForm();
         setShowForm(false);
       }
-    } catch (deleteError) {
+    } catch {
       setError('Unable to delete debt.');
     }
   };
@@ -180,7 +180,7 @@ export default function DebtsScreen() {
     try {
       const payoff = await request<DebtPayoff>(`/debts/${debt.id}/payoff`);
       setPayoffMap((prev) => ({ ...prev, [debt.id]: payoff }));
-    } catch (payoffError) {
+    } catch {
       setError('Unable to load payoff details.');
     }
   };

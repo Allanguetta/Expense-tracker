@@ -45,6 +45,37 @@ export type DashboardSummary = {
   }[];
 };
 
+export type Goal = {
+  id: number;
+  user_id: number;
+  name: string;
+  currency: string;
+  target_amount: number;
+  current_amount: number;
+  target_date?: string | null;
+  kind: 'savings' | 'debt_payoff' | 'purchase';
+  status: 'active' | 'completed' | 'archived';
+  notes?: string | null;
+  progress_pct: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReportSummary = {
+  currency: string;
+  months: {
+    month: string;
+    inflow: number;
+    outflow: number;
+    net: number;
+  }[];
+  top_expense_categories: {
+    category_id: number | null;
+    category_name: string | null;
+    total_spent: number;
+  }[];
+};
+
 export type Account = {
   id: number;
   name: string;

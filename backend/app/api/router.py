@@ -9,9 +9,11 @@ from app.api.routes import (
     crypto,
     dashboard,
     debts,
+    goals,
     health,
     imports,
     recurring,
+    reports,
     transactions,
     users,
 )
@@ -26,7 +28,9 @@ api_router.include_router(categories.router, prefix="/categories", tags=["catego
 api_router.include_router(category_rules.router, prefix="/category-rules", tags=["category-rules"])
 api_router.include_router(budgets.router, prefix="/budgets", tags=["budgets"])
 api_router.include_router(debts.router, prefix="/debts", tags=["debts"])
+api_router.include_router(goals.router, prefix="/goals", tags=["goals"])
 api_router.include_router(recurring.router, prefix="/recurring-payments", tags=["recurring"])
 api_router.include_router(crypto.router, prefix="/crypto", tags=["crypto"])
 api_router.include_router(imports.router, prefix="/imports", tags=["imports"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(reports.router, prefix="/reports", tags=["reports"])

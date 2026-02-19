@@ -202,7 +202,7 @@ export default function BudgetsScreen() {
       }
       resetForm();
       setShowForm(false);
-    } catch (saveError) {
+    } catch {
       setFormError(isEditing ? 'Unable to update budget.' : 'Unable to create budget.');
     } finally {
       setSaving(false);
@@ -239,7 +239,7 @@ export default function BudgetsScreen() {
         resetForm();
         setShowForm(false);
       }
-    } catch (deleteError) {
+    } catch {
       setError('Unable to delete budget.');
     }
   };

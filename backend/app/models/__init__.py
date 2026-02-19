@@ -13,6 +13,7 @@ from app.models.refresh_token import RefreshToken
 from app.models.sync_log import SyncLog
 from app.models.recurring_payment import RecurringPayment
 from app.models.category_rule import CategoryRule
+from app.models.goal import Goal
 
 __all__ = [
     "Base",
@@ -31,4 +32,5 @@ __all__ = [
     "SyncLog",
     "RecurringPayment",
     "CategoryRule",
+    "Goal",
 ]

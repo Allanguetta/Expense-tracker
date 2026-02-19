@@ -63,6 +63,20 @@ export default function AppLayout() {
         }}
       />
       <Drawer.Screen
+        name="goals"
+        options={{
+          title: 'Goals',
+          drawerIcon: ({ color }) => <MaterialIcons name="flag" size={22} color={color} />,
+        }}
+      />
+      <Drawer.Screen
+        name="reports"
+        options={{
+          title: 'Reports',
+          drawerIcon: ({ color }) => <MaterialIcons name="bar-chart" size={22} color={color} />,
+        }}
+      />
+      <Drawer.Screen
         name="debts"
         options={{
           title: 'Debts',
